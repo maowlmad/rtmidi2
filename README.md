@@ -17,12 +17,12 @@ version of Cython (>= 0.15), and run:
 
 ## Usage Examples
 
-_rtmidi-python_ uses the same API as RtMidi, only reformatted to comply with PEP-8,
+_rtmidi2_ uses the same API as RtMidi, only reformatted to comply with PEP-8,
 and with small changes to make it a little more pythonic.
 
 ### Print all output ports
 
-    import rtmidi_python as rtmidi
+    import rtmidi2 as rtmidi
 
     midi_out = rtmidi.MidiOut()
     for port_name in midi_out.ports:
@@ -30,17 +30,14 @@ and with small changes to make it a little more pythonic.
 
 ### Send messages
 
-    import rtmidi_python as rtmidi
+    import rtmidi2 as rtmidi
 
     midi_out = rtmidi.MidiOut()
     midi_out.open_port(0)
 
-    midi_out.send_message([0x90, 48, 100]) # Note on
-    midi_out.send_message([0x80, 48, 100]) # Note off
+    midi_out.send_noteon(0, 48, 100)  # send C3 with vel 100 on channel 1
 
 ### Get incoming messages by polling
-
-    import rtmidi_python as rtmidi
 
     midi_in = rtmidi.MidiIn()
     midi_in.open_port(0)
@@ -55,8 +52,6 @@ API: It returns a tuple instead of using a return parameter.
 
 ### Get incoming messages using a callback
 
-    import rtmidi_python as rtmidi
-
     def callback(message, time_stamp):
         print message, time_stamp
 
@@ -70,8 +65,25 @@ Note that the signature of the callback differs from the original RtMidi API:
 `message` is now the first parameter, like in the tuple returned by
 `get_message()`.
 
+
+### Open multiple ports at once
+   
+    midi_in = rtmidi.MidiInMulti().open_ports("*")
+    def callback(msg, timestamp):
+        print msg, timestamp
+    midi_in.callback = callback
+   
+### Send multiple notes at once (used in a sound to midi program)
+
+    midi_out = rtmidi.MidiOut().open_port()
+    notes = range(127)
+    velocities = [90] * len(notes)
+    midi_out.send_noteon_many(0, notes, velocities)
+    time.sleep(1)
+    midi_out.send_noteon_many(0, notes, [0] * len(notes))
+
 ## License
 
-_rtmidi-python_ is licensed under the MIT License, see `LICENSE`.
+_rtmidi2_ is licensed under the MIT License, see `LICENSE`.
 
 It uses RtMidi, licensed under a modified MIT License, see `RtMidi/RtMidi.h`.
