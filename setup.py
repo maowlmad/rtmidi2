@@ -1,13 +1,13 @@
 import distutils
 import sys
 
-if '--from-cython' in sys.argv:
+if not '--from-cpp' in sys.argv:
     from Cython.Distutils import build_ext
-    sys.argv.remove('--from-cython')
-    module_source = 'rtmidi_python.pyx'
+    module_source = 'rtmidi2.pyx'
 else:
     from distutils.command.build_ext import build_ext
-    module_source = 'rtmidi_python.cpp'
+    sys.argv.remove('--from-cpp')    
+    module_source = 'rtmidi2.cpp'
 
 extension_args = {}
 
@@ -35,19 +35,18 @@ if sys.platform == 'win32':
     )
 
 rtmidi_module = distutils.extension.Extension(
-    'rtmidi_python',
+    'rtmidi2',
     [module_source, 'RtMidi/RtMidi.cpp'],
     language='c++',
     **extension_args
 )
 
 distutils.core.setup(
-    name='rtmidi-python',
+    name='rtmidi2',
     version='0.2',
     description='Python wrapper for RtMidi',
     author='Guido Lorenz',
     author_email='code@superquadratic.net',
-    url='https://github.com/superquadratic/rtmidi-python',
     cmdclass={'build_ext': build_ext},
     ext_modules=[rtmidi_module],
     license='MIT',
