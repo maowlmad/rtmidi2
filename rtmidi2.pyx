@@ -90,8 +90,15 @@ cdef class MidiBase:
         return [i for i, port in enumerate(ports) if fnmatch.fnmatch(port, pattern)]
 
 cdef void midi_in_callback(double time_stamp, vector[unsigned char]* message_vector, void* py_callback) with gil:
+    cdef int i
     message = [message_vector.at(i) for i in range(message_vector.size())]
     (<object>py_callback)(message, time_stamp)
+
+cdef void midi_in_callback_with_src(double time_stamp, vector[unsigned char]* message_vector, void* pythontuple) with gil:
+    cdef int i
+    message = [message_vector.at(i) for i in range(message_vector.size())]
+    portname, callback = <tuple>pythontuple
+    callback(portname, message, time_stamp)
 
 cdef class MidiIn(MidiBase):
     cdef RtMidiIn* thisptr
@@ -180,12 +187,14 @@ cdef class MidiInMulti:
     cdef int queuesize
     cdef readonly object clientname
     cdef object py_callback
+    cdef list qualified_callbacks
     cdef list openports
     cdef dict hascallback
     def __cinit__(self, clientname="RTMIDI-IN", queuesize=100):
         self.inspector = new RtMidiIn(string(<char*>"RTMIDI-INSPECTOR"), queuesize)
         self.ptrs = new vector[RtMidiIn *]()
         self.py_callback = None
+        self.qualified_callbacks = []
     def __init__ (self, clientname="RTMIDI-IN", queuesize=100):
         """
         This class implements the capability to listen to multiple inputs at once
@@ -218,6 +227,8 @@ cdef class MidiInMulti:
     property ports:
         def __get__(self):
             return [self.inspector.getPortName(i).c_str() for i in range(self.inspector.getPortCount())]
+    def get_port_name(self, int i):
+        return self.inspector.getPortName(i).c_str()
     def get_openports(self):
         return self.openports
     def ports_matching(self, pattern):
@@ -294,6 +305,12 @@ cdef class MidiInMulti:
         def __set__(self, callback):
             cdef int i
             cdef RtMidiIn* ptr
+            try:
+                numargs = callback.__code__.co_argcount
+                if numargs == 3:
+                    self.set_qualified_callback(callback)
+            except AttributeError:
+                pass
             self.py_callback = callback
             for i in range(self.ptrs.size()):
                 ptr = self.ptrs.at(i)
@@ -303,10 +320,40 @@ cdef class MidiInMulti:
                 if callback is not None:
                     ptr.setCallback(midi_in_callback, <void*>callback)
                     self.hascallback[port] = True
+    def set_qualified_callback(self, callback, src_as_string=True):
+        """
+        this callback will be called with src, msg, time
+
+        where:
+            src  is the integer identifying the in-port or the string name if src_as_string is True. The string is: midiin.ports[src]
+            msg  is a 3 byte midi message
+            time is the time identifier of the message
+
+        """
+        cdef int i
+        cdef RtMidiIn* ptr
+        self.py_callback = callback
+        self.qualified_callbacks = []
+        for i in range(self.ptrs.size()):
+            ptr = self.ptrs.at(i)
+            port = self.openports[i]
+            if self.hascallback.get(port, False):
+                ptr.cancelCallback()
+            if callback is not None:
+                if not src_as_string:
+                    tup = (port, callback)
+                else:
+                    tup = (self.inspector.getPortName(i).c_str(), callback)
+                self.qualified_callbacks.append(tup)
+                ptr.setCallback(midi_in_callback_with_src, <void*>tup)
+                self.hascallback[port] = True
+                
+            
+        
     def get_message(self, int gettime=1):
         raise NotImplemented("The blocking interface is not implemented for multiple inputs. Use the callback system")
 
-def splitchannel(int b):
+cpdef tuple splitchannel(int b):
     """
     split the messagetype and the channel as returned by get_message
 
@@ -314,6 +361,10 @@ def splitchannel(int b):
     msgtype, channel = splitchannel(msg[0])
     """
     return b & 0xF0, b & 0x0F
+
+#def parsemsg(msg):
+#    msg, channel = splitchannel(msg[0])
+#    return msg, channel, int(msg[1]), int(msg[2])
 
 def msgtype2str(msgtype):
     return {
@@ -336,21 +387,22 @@ def mididump_callback(src, msg, t):
     msgtstr = msgtype2str(msgt)
     val1 = int(msg[1])
     val2 = int(msg[2])
-    print src,
+    srcstr = src.ljust(20)[:20]
     if msgt == CC:
-        print "CC | ch %d | cc %d | val %d" % (ch, val1, val2)
+        print "%s | CC | ch %02d | cc %03d | val %03d" % (srcstr, ch, val1, val2)
     elif msgt == NOTEON:
         notename = midi2note(val1)
-        print "NOTEON | ch %d | note %s (%d) | vel %d" % (ch, notename, val1, val2)
+        print "%s | NOTEON | ch %d | note %s (%03d) | vel %d" % (srcstr, ch, notename.ljust(3), val1, val2)
     else:
-        print "%s | ch %d | val1 %d | val2 %d" % (msgtstr, ch, val1, val2)
+        print "%s | %s | ch %d | val1 %d | val2 %d" % (srcstr, msgtstr, ch, val1, val2)
 
 def mididump(port_pattern="*"):
     """
     listen to all ports matching pattern and print the incomming messages
     """
     m = MidiInMulti().open_ports(port_pattern)
-    m.set_callback(mididump_callback)
+    # m.set_callback(mididump_callback)
+    m.set_qualified_callback(mididump_callback)
     return m
 
 cdef class MidiOut_slower(MidiBase):
