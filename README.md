@@ -1,7 +1,9 @@
-# rtmidi-python
+# rtmidi2
 
 Python wrapper for [RtMidi](http://www.music.mcgill.ca/~gary/rtmidi/), the
 lightweight, cross-platform MIDI I/O library. For Linux, Mac OS X and Windows.
+
+Based on rtmidi-python
 
 ## Setup
 
@@ -37,20 +39,20 @@ and with small changes to make it a little more pythonic.
 
     midi_out.send_noteon(0, 48, 100)  # send C3 with vel 100 on channel 1
 
-### Get incoming messages by polling
+### Get incoming messages - blocking interface
 
     midi_in = rtmidi.MidiIn()
     midi_in.open_port(0)
 
     while True:
-        message, delta_time = midi_in.get_message()
+        message, delta_time = midi_in.get_message()  # will block until a message is available
         if message:
             print message, delta_time
 
 Note that the signature of `get_message()` differs from the original RtMidi
-API: It returns a tuple instead of using a return parameter.
+API: It returns a tuple (message, delta_time)
 
-### Get incoming messages using a callback
+### Get incoming messages using a callback -- non blocking
 
     def callback(message, time_stamp):
         print message, time_stamp
@@ -60,22 +62,34 @@ API: It returns a tuple instead of using a return parameter.
     midi_in.open_port(0)
 
     # do something else here (but don't quit)
+    ...
 
 Note that the signature of the callback differs from the original RtMidi API:
 `message` is now the first parameter, like in the tuple returned by
 `get_message()`.
 
-
 ### Open multiple ports at once
    
-    midi_in = rtmidi.MidiInMulti().open_ports("*")
+    midi_in = MidiInMulti().open_ports("*")
     def callback(msg, timestamp):
-        print msg, timestamp
+        msgtype, channel = splitchannel(msg[0])
+        print msgtype2str(msgtype), msg[1], msg[2]
     midi_in.callback = callback
-   
-### Send multiple notes at once (used in a sound to midi program)
+    
+You can also get the device which generated the event by changing your callback to:
 
-    midi_out = rtmidi.MidiOut().open_port()
+    def callback(src, msg, timestamp):
+        print "got message from", src     # src will hold the name of the device
+        
+### Send multiple notes at once
+
+The usecase for this is limited to a few niche-cases, but was the reason why I initiated
+this fork on the first place. I needed a fast way to send multiple notes at once for
+an application transcribing the spectrum of a voice to midi messages to be played
+by an automated piano.
+
+    # send a cluster of ALL notes with a duration of 1 second
+    midi_out = MidiOut().open_port()
     notes = range(127)
     velocities = [90] * len(notes)
     midi_out.send_noteon_many(0, notes, velocities)
