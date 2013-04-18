@@ -1,0 +1,9 @@
+rtmidi2.cpp
+rtmidi2.pyx
+setup.py
+tests.py
+RtMidi\RtMidi.cpp
+RtMidi\RtMidi.h
+RtMidi\RtError.h
+README.md
+LICENSE
