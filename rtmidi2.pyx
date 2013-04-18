@@ -118,12 +118,10 @@ cdef class MidiBase:
 
 ### callbacks
 cdef void midi_in_callback(double time_stamp, vector[unsigned char]* message_vector, void* py_callback) with gil:
-    cdef int i
     message = [message_vector.at(i) for i in range(message_vector.size())]
     (<object>py_callback)(message, time_stamp)
 
 cdef void midi_in_callback_with_src(double time_stamp, vector[unsigned char]* message_vector, void* pythontuple) with gil:
-    cdef int i
     message = [message_vector.at(i) for i in range(message_vector.size())]
     portname, callback = <tuple>pythontuple
     callback(portname, message, time_stamp)
@@ -300,7 +298,7 @@ cdef class MidiInMulti:
         import fnmatch
         ports = self.ports
         return [i for i, port in enumerate(ports) if fnmatch.fnmatch(port, pattern)]
-    cpdef open_port(self, int port):
+    cpdef open_port(self, unsigned int port):
         """
         Low level interface to opening ports by index. Use open_ports to use a more
         confortable API.
@@ -316,7 +314,8 @@ cdef class MidiInMulti:
             
         SEE ALSO: open_ports
         """
-        assert port < self.inspector.getPortCount()
+        if port >= self.inspector.getPortCount():
+            raise ValueError("Port out of range")
         if port in self.openports:
             raise ValueError("Port already open!")
         cdef RtMidiIn* newport = new RtMidiIn(string(<char*>self.clientname), self.queuesize)
@@ -345,21 +344,15 @@ cdef class MidiInMulti:
                 midiout.send_noteoff(ch, msg[1] + 12, msg[2])
         midiin.callback = callback
         """
-        if isinstance(patterns, (tuple, list)):
-            for pattern in patterns:
-                self.open_ports(pattern)
-            return self
-        else:
-            matchingports = self.ports_matching(pattern)
-            for port in matchingports:
+        for pattern in patterns:
+            for port in self.ports_matching(pattern):
                 self.open_port(port)
-            return self
-
+        return self
+        
     cpdef close_ports(self):
         """closes all ports and deactivates any callback.
         NB: closing of individual ports is not implemented.
         """
-        cdef int i
         cdef RtMidiIn* ptr
         for i, port in enumerate(self.openports):
             ptr = self.ptrs.at(i)
@@ -375,7 +368,6 @@ cdef class MidiInMulti:
         def __get__(self):
             return self.py_callback
         def __set__(self, callback):
-            cdef int i
             cdef RtMidiIn* ptr
             try:
                 # numargs = callback.__code__.co_argcount
@@ -424,7 +416,7 @@ cdef class MidiInMulti:
         if numargs == 2:
             self.callback = callback
         elif numargs == 3:
-            self._seq_qualified_callback(callback, srd_as_string)
+            self._seq_qualified_callback(callback, src_as_string)
         else:
             raise ValueError("Your callback has to have either the signature (msg, time) or the signature (source, msg, time)")
         return self
@@ -442,7 +434,6 @@ cdef class MidiInMulti:
             time is the time identifier of the message
 
         """
-        cdef int i
         cdef RtMidiIn* ptr
         self.py_callback = callback
         self.qualified_callbacks = []
@@ -476,7 +467,7 @@ cpdef tuple splitchannel(int b):
 
 def _func_get_numargs(func):
     spec = inspect.getargspec(func)
-    numargs = sum(1 for a in spec.args if a is not "self"])
+    numargs = sum(1 for a in spec.args if a is not "self")
     return numargs
 
 def msgtype2str(msgtype):
@@ -564,7 +555,7 @@ cdef class MidiOut_slower(MidiBase):
         values1: the notenumbers or control numbers
         values2: the velocities or control values
         """
-        cdef int i, channel
+        cdef channel
         cdef vector[unsigned char]* m
         cdef unsigned char v0
         if isinstance(channels, int):
@@ -588,7 +579,6 @@ cdef class MidiOut_slower(MidiBase):
         message_vector.push_back( velocity )
         self.thisptr.sendMessage(message_vector)
     cpdef send_noteon_many(self, channels, notes, vels):
-        cdef int i
         cdef vector[unsigned char]* m
         if isinstance(notes, list):
             for i in range(len(<list>notes)):
@@ -606,7 +596,7 @@ cdef class MidiOut_slower(MidiBase):
         self.thisptr.sendMessage(m)
         del m
     cpdef send_noteoff_many(self, channels, notes):
-        cdef int i, channel, v0
+        cdef channel, v0
         cdef vector[unsigned char]* m
         if isinstance(channels, int):
             v0 = DNOTEOFF | <int>channels
@@ -689,7 +679,6 @@ cdef class MidiOut(MidiBase):
         messages = [(0, i, 0) for i in range(127)]
         m.send_messages(144, messages)
         """
-        cdef int i
         cdef vector[unsigned char]* m = new vector[unsigned char](3)
         cdef tuple tuprow
         if isinstance(messages, list):
@@ -710,7 +699,6 @@ cdef class MidiOut(MidiBase):
         """
         channels, notes and vels are sequences of integers.
         """
-        cdef int i
         cdef vector[unsigned char]* m = new vector[unsigned char](3)
         if isinstance(notes, list):
             for i in range(len(<list>notes)):
@@ -734,7 +722,7 @@ cdef class MidiOut(MidiBase):
 
         NB: channel -> 0-15
         """
-        cdef int i, channel, v0
+        cdef channel, v0
         cdef vector[unsigned char]* m = new vector[unsigned char](3)
         m[0][2] = 0
         if isinstance(channels, int):
