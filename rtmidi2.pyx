@@ -629,13 +629,17 @@ cdef class MidiOut(MidiBase):
         del self.msg3
     cdef RtMidi* baseptr(self):
         return self.thisptr
+
     def send_message(self, tuple message not None):
         """
         message is a tuple of bytes. this sends raw midi messages
         """
-        self.send_raw(message[0], message[1], message[2])
+        self._send_raw(message[0], message[1], message[2])
 
-    cdef inline void send_raw(self, unsigned char b0, unsigned char b1, unsigned char b2):
+    def send_raw(self, unsigned char b0, unsigned char b1, unsigned char b2):
+        self._send_raw(b0, b1, b2)
+
+    cdef inline void _send_raw(self, unsigned char b0, unsigned char b1, unsigned char b2):
         cdef vector[unsigned char]* v
         if self.msg3_locked:
             v = new vector[unsigned char](3)
@@ -656,7 +660,7 @@ cdef class MidiOut(MidiBase):
         """
         channel -> 0-15
         """
-        self.send_raw(DCC | channel, cc, value)
+        self._send_raw(DCC | channel, cc, value)
     cpdef send_messages(self, int messagetype, messages):
         """
         messagetype: 
@@ -694,7 +698,7 @@ cdef class MidiOut(MidiBase):
         """
         NB: channel -> 0.15
         """
-        self.send_raw(DNOTEON|channel, midinote, velocity)
+        self._send_raw(DNOTEON|channel, midinote, velocity)
     cpdef send_noteon_many(self, channels, notes, vels):
         """
         channels, notes and vels are sequences of integers.
@@ -714,7 +718,7 @@ cdef class MidiOut(MidiBase):
         """
         NB: channel -> 0-15
         """
-        self.send_raw(DNOTEOFF|channel, midinote, 0)
+        self._send_raw(DNOTEOFF|channel, midinote, 0)
     cpdef send_noteoff_many(self, channels, notes):
         """
         channels: a list of channels, or a single integer channel
