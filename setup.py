@@ -43,7 +43,7 @@ rtmidi_module = distutils.extension.Extension(
 
 distutils.core.setup(
     name='rtmidi2',
-    version='0.3.1',
+    version='0.4.0.5',
     description='Python wrapper for RtMidi written in Cython. Allows sending raw messages, multi-port input and sending multiple messages in one call.',
     author='originally by Guido Lorenz, modified by Eduardo Moguillansky',
     author_email='code@superquadratic.net',

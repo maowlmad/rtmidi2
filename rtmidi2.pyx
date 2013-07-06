@@ -14,6 +14,7 @@ from libc.stdlib cimport malloc, free
 
 ### python imports
 import inspect
+import fnmatch
 
 # Init Python threads and GIL, because RtMidi calls Python from native threads.
 # See http://permalink.gmane.org/gmane.comp.python.cython.user/5837
@@ -61,8 +62,11 @@ cdef extern from "RtMidi/RtMidi.h":
         void sendMessage(vector[unsigned char]* message)
 
 cdef class MidiBase:
+    # Private
     cdef RtMidi* baseptr(self):
         return NULL
+
+    # Public
     def open_port(self, port=0):
         """
         port: an integer or a string
@@ -86,21 +90,45 @@ cdef class MidiBase:
             if port in ports:
                 port_number = self.ports.index(port)
             else:
-                match = self.ports_patching(port)
+                match = self.ports_matching(port)
                 if match:
                     return self.open_port(match[0])
                 else:
                     raise ValueError("Port not found")
         self.baseptr().openPort(port_number)
         return self
+
+    def get_port_name(self, unsigned int port, encoding='utf-8'):
+        """Return name of given port number.
+
+        The port name is decoded to unicode with the encoding given by
+        ``encoding`` (defaults to ``'utf-8'``). If ``encoding`` is ``None``,
+        return string un-decoded.
+        """
+        cdef string name = self.baseptr().getPortName(port)
+        if len(name):
+            if encoding:
+                # XXX: kludge, there seems to be a bug in RtMidi as it returns
+                # improperly encoded strings from getPortName with some
+                # backends, so we just ignore decoding errors
+                return name.decode(encoding, errors="ignore")
+            else:
+                return name
+        else:
+            return None
+
+    property ports:
+        def __get__(self):
+            ports = (self.baseptr().getPortName(i).c_str() for i in range(self.baseptr().getPortCount()))
+            return [port for port in ports if port]
+
     def open_virtual_port(self, port_name):
         self.baseptr().openVirtualPort(string(<char*>port_name))
         return self
-    property ports:
-        def __get__(self):
-            return [self.baseptr().getPortName(i).c_str() for i in range(self.baseptr().getPortCount())]
+
     def close_port(self):
         self.baseptr().closePort()
+
     def ports_matching(self, pattern):
         """
         return the indexes of the ports which match the glob pattern
@@ -112,7 +140,6 @@ cdef class MidiBase:
         midiin.ports_matching("*")
 
         """
-        import fnmatch
         ports = self.ports
         return [i for i, port in enumerate(ports) if fnmatch.fnmatch(port, pattern)]
 
@@ -132,6 +159,7 @@ cdef class MidiIn(MidiBase):
     def __cinit__(self, clientname="RTMIDI-IN", queuesize=100):
         self.thisptr = new RtMidiIn(string(<char*>clientname), queuesize)
         self.py_callback = None
+
     def __init__(self, clientname="RTMIDI-IN", queuesize=100):
         """
         It is NOT necessary to give the client a name.
@@ -170,8 +198,10 @@ cdef class MidiIn(MidiBase):
     def __dealloc__(self):
         self.py_callback = None
         del self.thisptr
+
     cdef RtMidi* baseptr(self):
         return self.thisptr
+
     property callback:
         def __get__(self):
             return self.py_callback
@@ -180,6 +210,7 @@ cdef class MidiIn(MidiBase):
             self.py_callback = callback
             if self.py_callback is not None:
                 self.thisptr.setCallback(midi_in_callback, <void*>self.py_callback)
+
     def ignore_types(self, midi_sysex=True, midi_time=True, midi_sense=True):
         """
         Don't react to these messages. This avoids having to make your callback
@@ -187,6 +218,7 @@ cdef class MidiIn(MidiBase):
         but your not interested in that. 
         """
         self.thisptr.ignoreTypes(midi_sysex, midi_time, midi_sense)
+
     def get_message(self, int gettime=1):
         """
         Blocking interface. For non-blocking interface, use the callback method (midiin.callback = ...)
@@ -277,7 +309,8 @@ cdef class MidiInMulti:
         return "MidiInMulti ( %s )" % s
     property ports:
         def __get__(self):
-            return [self.inspector.getPortName(i).c_str() for i in range(self.inspector.getPortCount())]
+            ports = (self.inspector.getPortName(i).c_str() for i in range(self.inspector.getPortCount()))
+            return [port for port in ports if port]
     def get_port_name(self, int i):
         return self.inspector.getPortName(i).c_str()
     def get_openports(self):
@@ -354,39 +387,49 @@ cdef class MidiInMulti:
         NB: closing of individual ports is not implemented.
         """
         cdef RtMidiIn* ptr
-        for i, port in enumerate(self.openports):
+        for i, port_index in enumerate(self.openports):
             ptr = self.ptrs.at(i)
-            if self.hascallback[port]:
+            port = self.openports[i]
+            if self.hascallback.setdefault(port, False):
                 ptr.cancelCallback()
             ptr.closePort()
+        self.hascallback = {}
         self.ptrs.clear()
         self.openports = []
-        self.hascallback = {}
-        self.callback = None
-
+        
     property callback:
         def __get__(self):
             return self.py_callback
         def __set__(self, callback):
             cdef RtMidiIn* ptr
-            try:
-                # numargs = callback.__code__.co_argcount
-                numargs = _func_get_numargs(callback)
-                if numargs == 3:
-                    self._set_qualified_callback(callback)
-                    return
-            except AttributeError:
-                # this is a builtin function? Anyway, we assume it is a 2 arg callback
-                pass
-            self.py_callback = callback
-            for i in range(self.ptrs.size()):
-                ptr = self.ptrs.at(i)
-                port = self.openports[i]
-                if self.hascallback.get(port, False):
-                    ptr.cancelCallback()
-                if callback is not None:
-                    ptr.setCallback(midi_in_callback, <void*>callback)
-                    self.hascallback[port] = True
+            if callback is None:
+                self._cancel_callbacks()
+            else:
+                try:
+                    numargs = _func_get_numargs(callback)
+                    if numargs == 3:
+                        self._set_qualified_callback(callback)
+                        return
+                except AttributeError:
+                    # this is a builtin function? Anyway, we assume it is a 2 arg callback
+                    pass
+                self.py_callback = callback
+                for i in range(self.ptrs.size()):
+                    ptr = self.ptrs.at(i)
+                    port = self.openports[i]
+                    if self.hascallback.get(port, False):
+                        ptr.cancelCallback()
+                    if callback is not None:
+                        ptr.setCallback(midi_in_callback, <void*>callback)
+                        self.hascallback[port] = True
+
+    def _cancel_callbacks(self):
+        cdef RtMidiIn* ptr
+        for i in range(self.ptrs.size()):
+            ptr = self.ptrs.at(i)
+            port = self.openports[i]
+            if self.hascallback.get(port, False):
+                ptr.cancelCallback()
 
     def set_callback(self, callback, src_as_string=True):
         """
@@ -420,9 +463,6 @@ cdef class MidiInMulti:
         else:
             raise ValueError("Your callback has to have either the signature (msg, time) or the signature (source, msg, time)")
         return self
-    
-    def set_qualified_callback(self, *args, **kws):
-        raise TypeError("USE set_callback with a function with signature (src, msg, time)")
     
     def _set_qualified_callback(self, callback, src_as_string=True):
         """
@@ -516,6 +556,14 @@ def mididump(port_pattern="*"):
     m = MidiInMulti().open_ports(port_pattern)
     m.set_callback(mididump_callback, src_as_string=True)
     return m
+
+def get_in_ports():
+    """returns a list of available in ports"""
+    return MidiIn().ports
+
+def get_out_ports():
+    """returns a list of available out ports"""
+    return MidiOut().ports
 
 cdef class MidiOut_slower(MidiBase):
     cdef RtMidiOut* thisptr
@@ -615,6 +663,7 @@ cdef class MidiOut_slower(MidiBase):
     
 cdef class MidiOut(MidiBase):
     cdef RtMidiOut* thisptr
+    cdef bint virtual_port_opened
     cdef vector[unsigned char]* msg3
     cdef int msg3_locked
     def __cinit__(self):
@@ -623,12 +672,20 @@ cdef class MidiOut(MidiBase):
         for n in range(3):
             self.msg3.push_back(0)
         self.msg3_locked = 0
+        self.virtual_port_opened = False
     def __init__(self): pass
     def __dealloc__(self):
+        self.close_port()
         del self.thisptr
         del self.msg3
     cdef RtMidi* baseptr(self):
         return self.thisptr
+
+    def open_virtual_port(self, port_name):
+        if self.virtual_port_opened:
+            raise IOError("Only one virtual port can be opened. If you need more, create a new MidiOut")
+        self.virtual_port_opened = True
+        return MidiBase.open_virtual_port(self, port_name)
 
     def send_message(self, tuple message not None):
         """
@@ -641,6 +698,8 @@ cdef class MidiOut(MidiBase):
 
     cdef inline void _send_raw(self, unsigned char b0, unsigned char b1, unsigned char b2):
         cdef vector[unsigned char]* v
+        cdef vector[unsigned char] v2
+        
         if self.msg3_locked:
             v = new vector[unsigned char](3)
             v[0][0] = b0
@@ -746,3 +805,6 @@ cdef class MidiOut(MidiBase):
                 self.thisptr.sendMessage(m)       
         del m
         return None
+
+
+
