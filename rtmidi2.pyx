@@ -145,7 +145,7 @@ cdef class MidiBase:
 
 ### callbacks
 cdef void midi_in_callback(double time_stamp, vector[unsigned char]* message_vector, void* py_callback) with gil:
-    message = [message_vector.at(i) for i in range(message_vector.size())]
+    cdef list message = [message_vector.at(i) for i in range(message_vector.size())]
     (<object>py_callback)(message, time_stamp)
 
 cdef void midi_in_callback_with_src(double time_stamp, vector[unsigned char]* message_vector, void* pythontuple) with gil:
@@ -206,10 +206,15 @@ cdef class MidiIn(MidiBase):
         def __get__(self):
             return self.py_callback
         def __set__(self, callback):
-            self.thisptr.cancelCallback()  # cancel previous callback, if any
+            if self.py_callback is not None: # cancel previous callback
+                self.thisptr.cancelCallback()
+            if callback is not None:
+                self.py_callback = callback
+                self.thisptr.setCallback(midi_in_callback, <void*>callback)
             self.py_callback = callback
-            if self.py_callback is not None:
-                self.thisptr.setCallback(midi_in_callback, <void*>self.py_callback)
+
+    def get_callback(self):
+        return self.py_callback
 
     def ignore_types(self, midi_sysex=True, midi_time=True, midi_sense=True):
         """
@@ -315,7 +320,10 @@ cdef class MidiInMulti:
         return self.inspector.getPortName(i).c_str()
     def get_openports(self):
         return self.openports
-    def ports_matching(self, pattern):
+    def get_callback(self):
+        return self.py_callback
+
+    def ports_matching(self, pattern, exclude=None):
         """
         return the indexes of the ports which match the glob pattern
 
@@ -330,7 +338,10 @@ cdef class MidiInMulti:
         """
         import fnmatch
         ports = self.ports
-        return [i for i, port in enumerate(ports) if fnmatch.fnmatch(port, pattern)]
+        if exclude is None:
+            return [i for i, port in enumerate(ports) if fnmatch.fnmatch(port, pattern)]
+        else:
+            return [i for i, port in enumerate(ports) if fnmatch.fnmatch(port, pattern) and not fnmatch.fnmatch(port, exclude)]
     cpdef open_port(self, unsigned int port):
         """
         Low level interface to opening ports by index. Use open_ports to use a more
@@ -356,8 +367,14 @@ cdef class MidiInMulti:
         newport.openPort(port)
         self.ptrs.push_back(newport)
         self.openports.append(port)
+        # a new open port should be assigned a callback if this was already set
+        if self.py_callback is not None:
+            callback = self.py_callback
+            self._cancel_callbacks()
+            self.callback = callback
         return self
-    def open_ports(self, *patterns):
+
+    def open_ports(self, *patterns, exclude=None):
         """
         You can specify multiple patterns. Of course a pattern can be also be an exact match
         
@@ -378,24 +395,37 @@ cdef class MidiInMulti:
         midiin.callback = callback
         """
         for pattern in patterns:
-            for port in self.ports_matching(pattern):
+            for port in self.ports_matching(pattern, exclude):
                 self.open_port(port)
         return self
         
-    cpdef close_ports(self):
+    cpdef int close_ports(self):
         """closes all ports and deactivates any callback.
-        NB: closing of individual ports is not implemented.
         """
         cdef RtMidiIn* ptr
         for i, port_index in enumerate(self.openports):
             ptr = self.ptrs.at(i)
             port = self.openports[i]
-            if self.hascallback.setdefault(port, False):
+            if self.hascallback.get(port, False):
                 ptr.cancelCallback()
             ptr.closePort()
         self.hascallback = {}
         self.ptrs.clear()
         self.openports = []
+        return 1
+
+    cpdef int close_port(self, unsigned int port):
+        """returns 1 if OK, 0 if failed"""
+        if port not in self.openports:
+            return 0
+        cdef int port_index = self.openports.index(port)
+        cdef RtMidiIn* ptr = self.ptrs.at(port_index)
+        if self.hascallback.get(port_index, False):
+            ptr.cancelCallback()
+        ptr.closePort()
+        self.ptrs.erase(self.ptrs.begin()+port_index)
+        self.openports.pop(port_index)
+        return 1
         
     property callback:
         def __get__(self):
@@ -430,6 +460,8 @@ cdef class MidiInMulti:
             port = self.openports[i]
             if self.hascallback.get(port, False):
                 ptr.cancelCallback()
+                self.hascallback[port] = False
+        self.py_callback = None
 
     def set_callback(self, callback, src_as_string=True):
         """
@@ -459,7 +491,7 @@ cdef class MidiInMulti:
         if numargs == 2:
             self.callback = callback
         elif numargs == 3:
-            self._seq_qualified_callback(callback, src_as_string)
+            self._set_qualified_callback(callback, src_as_string)
         else:
             raise ValueError("Your callback has to have either the signature (msg, time) or the signature (source, msg, time)")
         return self
@@ -486,7 +518,7 @@ cdef class MidiInMulti:
                 if not src_as_string:
                     tup = (port, callback)
                 else:
-                    tup = (self.inspector.getPortName(i).c_str(), callback)
+                    tup = (self.inspector.getPortName(port).c_str(), callback)
                 self.qualified_callbacks.append(tup)
                 ptr.setCallback(midi_in_callback_with_src, <void*>tup)
                 self.hascallback[port] = True    
@@ -666,6 +698,10 @@ cdef class MidiOut(MidiBase):
     cdef bint virtual_port_opened
     cdef vector[unsigned char]* msg3
     cdef int msg3_locked
+    property _locked:
+        def __get__(self): return self.msg3_locked
+        def __set__(self, value):
+            self.msg3_locked = int(value)
     def __cinit__(self):
         self.thisptr = new RtMidiOut(string(<char*>"rtmidiout"))
         self.msg3 = new vector[unsigned char]()
@@ -696,12 +732,31 @@ cdef class MidiOut(MidiBase):
     def send_raw(self, unsigned char b0, unsigned char b1, unsigned char b2):
         self._send_raw(b0, b1, b2)
 
+    def send_pitchbend(self, unsigned char channel, unsigned int transp):
+        """
+        channel: 0-15
+        pitch: 0 to 16383
+
+        no transposition (center): 8192
+
+        The MIDI standard specifies a default of 2 semitones UP and 2 semitones DOWN for 
+        the pitch-wheel. So to convert cents to pitchbend (cents between -200 and 200),
+
+        SEE ALSO:
+            pitchbend2cents
+            cents2pitchbend
+        """
+        cdef unsigned char b1, b2
+        if transp > 16383:
+            return
+        b1 = transp & 127
+        b2 = transp >> 7
+        self._send_raw(DPITCHWHEEL+channel, b1, b2)
+
     cdef inline void _send_raw(self, unsigned char b0, unsigned char b1, unsigned char b2):
         cdef vector[unsigned char]* v
-        cdef vector[unsigned char] v2
-        
         if self.msg3_locked:
-            v = new vector[unsigned char](3)
+            v = new vector[unsigned char]()
             v[0][0] = b0
             v[0][1] = b1
             v[0][2] = b2
@@ -728,7 +783,6 @@ cdef class MidiOut(MidiBase):
             NOTEOFF    128
             PROGCHANGE 192
             PITCHWHEEL 224
-        channels: a list of channels
         messages: a list of tuples of the form (channel, value1, value2), or a numpy 2D array with 3 columns and n rows
         where channel is an int between 0-15, value1 is the midinote or ccnumber, etc, and value2 is the value of the message (velocity, control value, etc)
 
@@ -742,7 +796,10 @@ cdef class MidiOut(MidiBase):
         messages = [(0, i, 0) for i in range(127)]
         m.send_messages(144, messages)
         """
-        cdef vector[unsigned char]* m = new vector[unsigned char](3)
+        cdef vector[unsigned char]* m = new vector[unsigned char]()
+        m.push_back(0)
+        m.push_back(0)
+        m.push_back(0)
         cdef tuple tuprow
         if isinstance(messages, list):
             for tuprow in <list>messages:
@@ -806,5 +863,12 @@ cdef class MidiOut(MidiBase):
         del m
         return None
 
+cpdef int cents2pitchbend(int cents, int maxdeviation=200):
+    """ 
+    cents: an integer between -maxdeviation and +maxdviation
+    """
+    return int((cents+maxdeviation)/(maxdeviation*2.0) * 16383.0 + 0.5)
 
+cpdef int pitchbend2cents(int pitchbend, maxcents=200):
+    return int(((pitchbend/16383.0)*(maxcents*2.0))-maxcents+0.5)
 

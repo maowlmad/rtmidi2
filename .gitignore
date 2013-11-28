@@ -3,3 +3,5 @@
 
 /rtmidi_python.so
 /rtmidi_python.pyd
+RtMidi-new
+rtmidi2.cpp
