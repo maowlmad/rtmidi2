@@ -62,6 +62,7 @@ cdef extern from "RtMidi/RtMidi.h":
         void sendMessage(vector[unsigned char]* message)
 
 cdef class MidiBase:
+    cdef readonly list _openedports
     # Private
     cdef RtMidi* baseptr(self):
         return NULL
@@ -73,7 +74,7 @@ cdef class MidiBase:
         
         The string can contain a pattern, in which case it will be matched against
         the existing ports and the first match will be used
-        
+
         Example
         =======
         
@@ -96,6 +97,7 @@ cdef class MidiBase:
                 else:
                     raise ValueError("Port not found")
         self.baseptr().openPort(port_number)
+        self._openedports.append(port_number)
         return self
 
     def get_port_name(self, unsigned int port, encoding='utf-8'):
@@ -123,6 +125,7 @@ cdef class MidiBase:
             return [port for port in ports if port]
 
     def open_virtual_port(self, port_name):
+        self._openedports.append(port_name)
         self.baseptr().openVirtualPort(string(<char*>port_name))
         return self
 
@@ -259,7 +262,7 @@ cdef class MidiInMulti:
     cdef readonly object clientname
     cdef object py_callback
     cdef list qualified_callbacks
-    cdef list openports
+    cdef readonly list _openedports
     cdef dict hascallback
     def __cinit__(self, clientname="RTMIDI-IN", queuesize=100):
         self.inspector = new RtMidiIn(string(<char*>"RTMIDI-INSPECTOR"), queuesize)
@@ -301,7 +304,7 @@ cdef class MidiInMulti:
         """
         self.queuesize = queuesize
         self.clientname = clientname
-        self.openports = []
+        self._openedports = []
         self.hascallback = {}
     def __dealloc__(self):
         self.close_ports()
@@ -310,7 +313,7 @@ cdef class MidiInMulti:
         del self.inspector
     def __repr__(self):
         allports = self.ports
-        s = " + ".join(allports[port] for port in self.openports)
+        s = " + ".join(allports[port] for port in self._openedports)
         return "MidiInMulti ( %s )" % s
     property ports:
         def __get__(self):
@@ -318,8 +321,8 @@ cdef class MidiInMulti:
             return [port for port in ports if port]
     def get_port_name(self, int i):
         return self.inspector.getPortName(i).c_str()
-    def get_openports(self):
-        return self.openports
+    def get__openedports(self):
+        return self._openedports
     def get_callback(self):
         return self.py_callback
 
@@ -360,13 +363,13 @@ cdef class MidiInMulti:
         """
         if port >= self.inspector.getPortCount():
             raise ValueError("Port out of range")
-        if port in self.openports:
+        if port in self._openedports:
             raise ValueError("Port already open!")
         cdef RtMidiIn* newport = new RtMidiIn(string(<char*>self.clientname), self.queuesize)
         portname = self.inspector.getPortName(port).c_str()
         newport.openPort(port)
         self.ptrs.push_back(newport)
-        self.openports.append(port)
+        self._openedports.append(port)
         # a new open port should be assigned a callback if this was already set
         if self.py_callback is not None:
             callback = self.py_callback
@@ -403,28 +406,28 @@ cdef class MidiInMulti:
         """closes all ports and deactivates any callback.
         """
         cdef RtMidiIn* ptr
-        for i, port_index in enumerate(self.openports):
+        for i, port_index in enumerate(self._openedports):
             ptr = self.ptrs.at(i)
-            port = self.openports[i]
+            port = self._openedports[i]
             if self.hascallback.get(port, False):
                 ptr.cancelCallback()
             ptr.closePort()
         self.hascallback = {}
         self.ptrs.clear()
-        self.openports = []
+        self._openedports = []
         return 1
 
     cpdef int close_port(self, unsigned int port):
         """returns 1 if OK, 0 if failed"""
-        if port not in self.openports:
+        if port not in self._openedports:
             return 0
-        cdef int port_index = self.openports.index(port)
+        cdef int port_index = self._openedports.index(port)
         cdef RtMidiIn* ptr = self.ptrs.at(port_index)
         if self.hascallback.get(port_index, False):
             ptr.cancelCallback()
         ptr.closePort()
         self.ptrs.erase(self.ptrs.begin()+port_index)
-        self.openports.pop(port_index)
+        self._openedports.pop(port_index)
         return 1
         
     property callback:
@@ -446,7 +449,7 @@ cdef class MidiInMulti:
                 self.py_callback = callback
                 for i in range(self.ptrs.size()):
                     ptr = self.ptrs.at(i)
-                    port = self.openports[i]
+                    port = self._openedports[i]
                     if self.hascallback.get(port, False):
                         ptr.cancelCallback()
                     if callback is not None:
@@ -457,7 +460,7 @@ cdef class MidiInMulti:
         cdef RtMidiIn* ptr
         for i in range(self.ptrs.size()):
             ptr = self.ptrs.at(i)
-            port = self.openports[i]
+            port = self._openedports[i]
             if self.hascallback.get(port, False):
                 ptr.cancelCallback()
                 self.hascallback[port] = False
@@ -511,7 +514,7 @@ cdef class MidiInMulti:
         self.qualified_callbacks = []
         for i in range(self.ptrs.size()):
             ptr = self.ptrs.at(i)
-            port = self.openports[i]
+            port = self._openedports[i]
             if self.hascallback.get(port, False):
                 ptr.cancelCallback()
             if callback is not None:
@@ -698,6 +701,7 @@ cdef class MidiOut(MidiBase):
     cdef bint virtual_port_opened
     cdef vector[unsigned char]* msg3
     cdef int msg3_locked
+    
     property _locked:
         def __get__(self): return self.msg3_locked
         def __set__(self, value):
@@ -709,6 +713,7 @@ cdef class MidiOut(MidiBase):
             self.msg3.push_back(0)
         self.msg3_locked = 0
         self.virtual_port_opened = False
+        self._openedports = []
     def __init__(self): pass
     def __dealloc__(self):
         self.close_port()
