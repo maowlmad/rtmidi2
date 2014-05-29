@@ -136,6 +136,8 @@ cdef class MidiBase:
             return [port for port in ports if port]
 
     def open_virtual_port(self, port_name):
+        if not isinstance(port_name, bytes):
+            port_name = port_name.encode("ASCII", errors="ignore")
         self._openedports.append(port_name)
         self.baseptr().openVirtualPort(string(<char*>port_name))
         return self
@@ -668,6 +670,8 @@ cdef class MidiOut(MidiBase):
         return self.thisptr
 
     def open_virtual_port(self, port_name):
+        if not isinstance(port_name, bytes):
+            port_name = port_name.encode("ASCII", errors="ignore")
         if self.virtual_port_opened:
             raise IOError("Only one virtual port can be opened. If you need more, create a new MidiOut")
         self.virtual_port_opened = True
@@ -790,7 +794,7 @@ cdef class MidiOut(MidiBase):
         NB: channel -> 0-15
         """
         self._send_raw(DNOTEOFF|channel, midinote, 0)
-        
+
     cpdef send_noteoff_many(self, channels, notes):
         """
         channels: a list of channels, or a single integer channel

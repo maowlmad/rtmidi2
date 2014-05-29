@@ -11,7 +11,10 @@ The wrapper is written in [Cython](http://www.cython.org). Cython should
 be installed for this module to be installed
 
     python setup.py install
+    
+## Python 2 & 3
 
+Thanks to Cython, this module is both compatible with Python 2 and Python 3. The only visible difference is that under python 3, all strings are byte strings. If you pass a unicode string to any function taking a string (open_virtual_port), an attempt will be made to encode the string as ASCII, through .encode("ASCII", errors="ignore"). 
 
 ## Usage Examples
 
