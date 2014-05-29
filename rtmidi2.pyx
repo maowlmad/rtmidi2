@@ -211,6 +211,7 @@ cdef class MidiIn(MidiBase):
         """
         # this declaration is here so that the docstring gets generated
         pass
+
     def __dealloc__(self):
         self.py_callback = None
         del self.thisptr
@@ -229,9 +230,6 @@ cdef class MidiIn(MidiBase):
             else:
                 self.py_callback = callback
                 self.thisptr.setCallback(midi_in_callback, <void*>callback)
-
-    def get_callback(self):
-        return self.py_callback
 
     def ignore_types(self, midi_sysex=True, midi_time=True, midi_sense=True):
         """
@@ -278,13 +276,15 @@ cdef class MidiInMulti:
     cdef list qualified_callbacks
     cdef readonly list _openedports
     cdef dict hascallback
+
     def __cinit__(self, clientname="RTMIDI-IN", queuesize=100):
         # self.inspector = new RtMidiIn(string(<char*>"RTMIDI-INSPECTOR"), queuesize)
         self.inspector = new RtMidiIn(UNSPECIFIED, string(<char*>"RTMIDI-INSPECTOR"), queuesize)
         self.ptrs = new vector[RtMidiIn *]()
         self.py_callback = None
         self.qualified_callbacks = []
-    def __init__ (self, clientname="RTMIDI-IN", queuesize=100):
+
+    def __init__(self, clientname="RTMIDI-IN", queuesize=100):
         """
         This class implements the capability to listen to multiple inputs at once
         A callback needs to be defined, as in MidiIn, which will be called if any
@@ -321,23 +321,30 @@ cdef class MidiInMulti:
         self.clientname = clientname
         self._openedports = []
         self.hascallback = {}
+
     def __dealloc__(self):
         self.close_ports()
         self.inspector.closePort()
         del self.ptrs
         del self.inspector
+
     def __repr__(self):
         allports = self.ports
         s = " + ".join(allports[port] for port in self._openedports)
         return "MidiInMulti ( %s )" % s
+
     property ports:
         def __get__(self):
             ports = (self.inspector.getPortName(i).c_str() for i in range(self.inspector.getPortCount()))
             return [port for port in ports if port]
+
+    property openedports:
+        def __get__(self):
+            return self._openedports
+
     def get_port_name(self, int i):
         return self.inspector.getPortName(i).c_str()
-    def get__openedports(self):
-        return self._openedports
+
     def get_callback(self):
         return self.py_callback
 
@@ -360,6 +367,7 @@ cdef class MidiInMulti:
             return [i for i, port in enumerate(ports) if fnmatch.fnmatch(port, pattern)]
         else:
             return [i for i, port in enumerate(ports) if fnmatch.fnmatch(port, pattern) and not fnmatch.fnmatch(port, exclude)]
+
     cpdef open_port(self, unsigned int port):
         """
         Low level interface to opening ports by index. Use open_ports to use a more
@@ -418,8 +426,7 @@ cdef class MidiInMulti:
         return self
         
     cpdef int close_ports(self):
-        """closes all ports and deactivates any callback.
-        """
+        """closes all ports and deactivates any callback."""
         cdef RtMidiIn* ptr
         for i, port_index in enumerate(self._openedports):
             ptr = self.ptrs.at(i)
@@ -487,11 +494,14 @@ cdef class MidiInMulti:
         
         midiin.callback = mycallback
         
-        But lets you specify if you want your callback to be called as callback(msg, time) or callback(src, msg, time)
+        But lets you specify if you want your callback to be called as 
+        callback(msg, time) or callback(src, msg, time)
         
         callback (function) : your callback. 
-        src_as_string (bool): This only applies for the case where your callback is (src, msg, time)
-                              In this case, if src_as_string is True, the source is the string representing the source
+        src_as_string (bool): This only applies for the case where your 
+                              callback is (src, msg, time)
+                              In this case, if src_as_string is True, 
+                              the source is the string representing the source
                               Otherwise, it is the port number.
                               
         Example
@@ -503,7 +513,8 @@ cdef class MidiInMulti:
             print msgtype, msg[1], msg[2]
             
         midiin = MidiInMulti().open_ports("*")
-        midiin.set_callback( callback_with_source )   # your callback will be called according to its signature
+        # your callback will be called according to its signature
+        midiin.set_callback( callback_with_source )   
         """
         numargs = _func_get_numargs(callback)
         if numargs == 2:
@@ -551,6 +562,8 @@ cpdef tuple splitchannel(int b):
     msg = midiin.get_message()
     msgtype, channel = splitchannel(msg[0])
     
+    return b & 0xF0, b & 0x0F
+
     SEE ALSO: msgtype2str
     """
     return b & 0xF0, b & 0x0F
@@ -614,6 +627,7 @@ def get_in_ports():
 def get_out_ports():
     """returns a list of available out ports"""
     return MidiOut().ports
+
 
 cdef class MidiOut_slower(MidiBase):
     cdef RtMidiOut* thisptr
