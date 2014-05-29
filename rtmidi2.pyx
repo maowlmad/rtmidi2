@@ -66,7 +66,6 @@ cdef extern from "RtMidi/RtMidi.h":
         void cancelCallback()
         void ignoreTypes(bint midiSysex, bint midiTime, bint midiSense)
         double getMessage(vector[unsigned char]* message)
-        setQueueSizeLimit
 
     cdef cppclass RtMidiOut(RtMidi):
         # RtMidiOut(RtMidi.Api api, string clientName)
