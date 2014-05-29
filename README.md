@@ -22,9 +22,11 @@ _rtmidi2_ uses a very similar API as RtMidi
 
 ### Print all in and out ports
 
-    import rtmidi2
-    print(rtmidi2.get_in_ports())
-    print(rtmidi2.get_out_ports())
+```python
+import rtmidi2
+print(rtmidi2.get_in_ports())
+print(rtmidi2.get_out_ports())
+```
 
 ### Send messages
 
