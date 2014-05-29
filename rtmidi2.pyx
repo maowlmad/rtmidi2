@@ -62,11 +62,12 @@ cdef extern from "RtMidi/RtMidi.h":
         
     cdef cppclass RtMidiIn(RtMidi):
         RtMidiIn(RtMidi.Api api, string clientName, unsigned int queueSizeLimit)
-        # RtMidiIn()
         void setCallback(RtMidiCallback callback, void* userData)
         void cancelCallback()
         void ignoreTypes(bint midiSysex, bint midiTime, bint midiSense)
         double getMessage(vector[unsigned char]* message)
+        setQueueSizeLimit
+
     cdef cppclass RtMidiOut(RtMidi):
         # RtMidiOut(RtMidi.Api api, string clientName)
         RtMidiOut()
@@ -221,12 +222,13 @@ cdef class MidiIn(MidiBase):
         def __get__(self):
             return self.py_callback
         def __set__(self, callback):
-            if self.py_callback is not None: # cancel previous callback
-                self.thisptr.cancelCallback()
-            if callback is not None:
+            if callback is None:
+                if self.py_callback is not None:
+                    self.thisptr.cancelCallback()
+                    self.py_callback = None
+            else:
                 self.py_callback = callback
                 self.thisptr.setCallback(midi_in_callback, <void*>callback)
-            self.py_callback = callback
 
     def get_callback(self):
         return self.py_callback
