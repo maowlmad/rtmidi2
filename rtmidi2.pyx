@@ -170,14 +170,18 @@ cdef void midi_in_callback_with_src(double time_stamp, vector[unsigned char]* me
 cdef class MidiIn(MidiBase):
     cdef RtMidiIn* thisptr
     cdef object py_callback
-    def __cinit__(self, clientname="RTMIDI-IN", queuesize=100):
-        #self.thisptr = new RtMidiIn(string(<char*>clientname), queuesize)
-        self.thisptr = new RtMidiIn(UNSPECIFIED, string(<char*>clientname), queuesize)
+
+    def __cinit__(self, clientname=None, queuesize=100):
+        if clientname is None:
+            self.thisptr = new RtMidiIn(UNSPECIFIED, string(<char*>"RTMIDI"), queuesize)
+        else:
+            clientname = clientname.encode("ASCII", errors="ignore")
+            self.thisptr = new RtMidiIn(UNSPECIFIED, string(<char*>clientname), queuesize)
         self.py_callback = None
 
-    def __init__(self, clientname="RTMIDI-IN", queuesize=100):
+    def __init__(self, clientname=None, queuesize=100):
         """
-        It is NOT necessary to give the client a name.
+        clientname (optional): the name of the client (bytes string, no unicode)
         queuesize: the size of the queue in bytes.
 
         Example
@@ -276,14 +280,14 @@ cdef class MidiInMulti:
     cdef readonly list _openedports
     cdef dict hascallback
 
-    def __cinit__(self, clientname="RTMIDI-IN", queuesize=100):
+    def __cinit__(self, clientname=None, queuesize=100):
         # self.inspector = new RtMidiIn(string(<char*>"RTMIDI-INSPECTOR"), queuesize)
         self.inspector = new RtMidiIn(UNSPECIFIED, string(<char*>"RTMIDI-INSPECTOR"), queuesize)
         self.ptrs = new vector[RtMidiIn *]()
         self.py_callback = None
         self.qualified_callbacks = []
 
-    def __init__(self, clientname="RTMIDI-IN", queuesize=100):
+    def __init__(self, clientname=None, queuesize=100):
         """
         This class implements the capability to listen to multiple inputs at once
         A callback needs to be defined, as in MidiIn, which will be called if any
@@ -317,9 +321,11 @@ cdef class MidiInMulti:
         multi.callback = callback
         """
         self.queuesize = queuesize
-        self.clientname = clientname
         self._openedports = []
         self.hascallback = {}
+        if clientname is None:
+            clientname = "RTMIDI"
+        self.clientname = clientname.encode("ASCII", errors="ignore")
 
     def __dealloc__(self):
         self.close_ports()
@@ -554,6 +560,11 @@ cdef class MidiInMulti:
     def get_message(self, int gettime=1):
         raise NotImplemented("The blocking interface is not implemented for multiple inputs. Use the callback system")
 
+
+##########################################
+#              UTILITIES
+##########################################
+
 cpdef tuple splitchannel(int b):
     """
     split the messagetype and the channel as returned by get_message
@@ -627,103 +638,6 @@ def get_out_ports():
     """returns a list of available out ports"""
     return MidiOut().ports
 
-
-cdef class MidiOut_slower(MidiBase):
-    cdef RtMidiOut* thisptr
-    def __cinit__(self):
-        #self.thisptr = new RtMidiOut(string(<char*>"rtmidiout"))
-        self.thisptr = new RtMidiOut()
-    def __init__(self):
-        pass
-    def __dealloc__(self):
-        del self.thisptr
-    cdef RtMidi* baseptr(self):
-        return self.thisptr
-    cpdef send_message(self, message):
-        cdef vector[unsigned char]* message_vector = new vector[unsigned char]()
-        for byte in message:
-            message_vector.push_back(byte)
-        self.thisptr.sendMessage(message_vector)
-        del message_vector
-    cpdef send_cc(self, int channel, int cc, int value):
-        cdef vector[unsigned char]* m = new vector[unsigned char]()
-        m.push_back(DCC | channel)
-        m.push_back(cc)
-        m.push_back(value)
-        self.thisptr.sendMessage(m)
-    cpdef send_messages(self, int messagetype, channels, values1, values2):
-        """
-        send multiple messages of the same type at once
-
-        messagetype: 
-            NOTEON     144
-            CC         176
-            NOTEOFF    128
-            PROGCHANGE 192
-            PITCHWHEEL 224
-
-        channels: a sequence of integers defining the channel, or only one int if the
-        channel is the same for all messages
-        values1: the notenumbers or control numbers
-        values2: the velocities or control values
-        """
-        cdef channel
-        cdef vector[unsigned char]* m
-        cdef unsigned char v0
-        if isinstance(channels, int):
-            channel = channels
-            v0 = messagetype | channel
-        else:
-            raise ValueError("multiple channels in a function call not implemented yet")
-        if isinstance(values1, list):
-            for i in range(len(<list>values1)):
-                m = new vector[unsigned char]()
-                m.push_back( v0 )
-                m.push_back(<int>(<list>values1)[i])
-                m.push_back(<int>(<list>values2)[i])
-                self.thisptr.sendMessage(m)
-                del m
-        return None            
-    cpdef send_noteon(self, int channel, int midinote, int velocity):
-        cdef vector[unsigned char]* message_vector = new vector[unsigned char]()
-        message_vector.push_back( DNOTEON|channel )
-        message_vector.push_back( midinote )
-        message_vector.push_back( velocity )
-        self.thisptr.sendMessage(message_vector)
-    cpdef send_noteon_many(self, channels, notes, vels):
-        cdef vector[unsigned char]* m
-        if isinstance(notes, list):
-            for i in range(len(<list>notes)):
-                m = new vector[unsigned char]()
-                m.push_back( DNOTEON |<unsigned char>(<list>channels)[i])
-                m.push_back(<unsigned char>(<list>notes)[i])
-                m.push_back(<unsigned char>(<list>vels)[i])
-                self.thisptr.sendMessage(m)
-                del m
-    cpdef send_noteoff(self, unsigned char channel, unsigned char midinote):
-        cdef vector[unsigned char]* m = new vector[unsigned char]()
-        m.push_back(DNOTEOFF|channel)
-        m.push_back(midinote)
-        m.push_back(0)
-        self.thisptr.sendMessage(m)
-        del m
-    cpdef send_noteoff_many(self, channels, notes):
-        cdef channel, v0
-        cdef vector[unsigned char]* m
-        if isinstance(channels, int):
-            v0 = DNOTEOFF | <int>channels
-            if isinstance(notes, list):
-                for i in range(len(<list>notes)):
-                    m = new vector[unsigned char]()
-                    m.push_back( v0 )
-                    m.push_back(<int>(<list>notes)[i])
-                    m.push_back(0)
-                    self.thisptr.sendMessage(m)
-                    del m
-            else:
-                raise NotImplemented("only lists implemented right now")
-        else:
-            raise NotImplemented("no multiple channels implemented right now")
     
 cdef class MidiOut(MidiBase):
     cdef RtMidiOut* thisptr
@@ -749,6 +663,7 @@ cdef class MidiOut(MidiBase):
         self.close_port()
         del self.thisptr
         del self.msg3
+
     cdef RtMidi* baseptr(self):
         return self.thisptr
 
@@ -805,11 +720,13 @@ cdef class MidiOut(MidiBase):
             v[0][2] = b2
             self.thisptr.sendMessage(v)
             self.msg3_locked = 0
+
     cpdef send_cc(self, unsigned char channel, unsigned char cc, unsigned char value):
         """
         channel -> 0-15
         """
         self._send_raw(DCC | channel, cc, value)
+
     cpdef send_messages(self, int messagetype, messages):
         """
         messagetype: 
@@ -844,12 +761,14 @@ cdef class MidiOut(MidiBase):
             del m
             raise TypeError("messages should be a list of tuples. other containers (numpy arrays) are still not supported")
         del m
-        return None            
+        return None  
+
     cpdef send_noteon(self, unsigned char channel, unsigned char midinote, unsigned char velocity):
         """
         NB: channel -> 0.15
         """
         self._send_raw(DNOTEON|channel, midinote, velocity)
+
     cpdef send_noteon_many(self, channels, notes, vels):
         """
         channels, notes and vels are sequences of integers.
@@ -865,11 +784,13 @@ cdef class MidiOut(MidiBase):
             del m
             raise NotImplemented("channels, notes and vels should be lists. other containers are not yet implemented")
         del m
+
     cpdef send_noteoff(self, unsigned char channel, unsigned char midinote):
         """
         NB: channel -> 0-15
         """
         self._send_raw(DNOTEOFF|channel, midinote, 0)
+        
     cpdef send_noteoff_many(self, channels, notes):
         """
         channels: a list of channels, or a single integer channel
