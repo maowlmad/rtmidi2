@@ -1,7 +1,6 @@
-/build
-/cython_debug
-
-/rtmidi_python.so
-/rtmidi_python.pyd
+build
+cython_debug
+dist
 RtMidi-new
 rtmidi2.cpp
+*.so

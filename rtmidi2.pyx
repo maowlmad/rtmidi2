@@ -42,6 +42,14 @@ cdef dict MSGTYPES = {
     PROGCHANGE: 'PROGCHANGE'
 }
 
+cdef extern from "RtMidi/RtMidi.h" namespace "RtMidi":
+    cdef enum Api:
+        UNSPECIFIED,
+        MAXOSX_CORE,
+        LINUX_ALSE,
+        WINDOWS_MM,
+        RTMIDI_DUMMY
+
 ### C++ interface
 cdef extern from "RtMidi/RtMidi.h":
     ctypedef void (*RtMidiCallback)(double timeStamp, vector[unsigned char]* message, void* userData)
@@ -51,14 +59,17 @@ cdef extern from "RtMidi/RtMidi.h":
         unsigned int getPortCount()
         string getPortName(unsigned int portNumber)
         void closePort()
+        
     cdef cppclass RtMidiIn(RtMidi):
-        RtMidiIn(string clientName, unsigned int queueSizeLimit)
+        RtMidiIn(RtMidi.Api api, string clientName, unsigned int queueSizeLimit)
+        # RtMidiIn()
         void setCallback(RtMidiCallback callback, void* userData)
         void cancelCallback()
         void ignoreTypes(bint midiSysex, bint midiTime, bint midiSense)
         double getMessage(vector[unsigned char]* message)
     cdef cppclass RtMidiOut(RtMidi):
-        RtMidiOut(string clientName)
+        # RtMidiOut(RtMidi.Api api, string clientName)
+        RtMidiOut()
         void sendMessage(vector[unsigned char]* message)
 
 cdef class MidiBase:
@@ -160,7 +171,8 @@ cdef class MidiIn(MidiBase):
     cdef RtMidiIn* thisptr
     cdef object py_callback
     def __cinit__(self, clientname="RTMIDI-IN", queuesize=100):
-        self.thisptr = new RtMidiIn(string(<char*>clientname), queuesize)
+        #self.thisptr = new RtMidiIn(string(<char*>clientname), queuesize)
+        self.thisptr = new RtMidiIn(UNSPECIFIED, string(<char*>clientname), queuesize)
         self.py_callback = None
 
     def __init__(self, clientname="RTMIDI-IN", queuesize=100):
@@ -265,7 +277,8 @@ cdef class MidiInMulti:
     cdef readonly list _openedports
     cdef dict hascallback
     def __cinit__(self, clientname="RTMIDI-IN", queuesize=100):
-        self.inspector = new RtMidiIn(string(<char*>"RTMIDI-INSPECTOR"), queuesize)
+        # self.inspector = new RtMidiIn(string(<char*>"RTMIDI-INSPECTOR"), queuesize)
+        self.inspector = new RtMidiIn(UNSPECIFIED, string(<char*>"RTMIDI-INSPECTOR"), queuesize)
         self.ptrs = new vector[RtMidiIn *]()
         self.py_callback = None
         self.qualified_callbacks = []
@@ -365,7 +378,7 @@ cdef class MidiInMulti:
             raise ValueError("Port out of range")
         if port in self._openedports:
             raise ValueError("Port already open!")
-        cdef RtMidiIn* newport = new RtMidiIn(string(<char*>self.clientname), self.queuesize)
+        cdef RtMidiIn* newport = new RtMidiIn(UNSPECIFIED, string(<char*>self.clientname), self.queuesize)
         portname = self.inspector.getPortName(port).c_str()
         newport.openPort(port)
         self.ptrs.push_back(newport)
@@ -603,7 +616,8 @@ def get_out_ports():
 cdef class MidiOut_slower(MidiBase):
     cdef RtMidiOut* thisptr
     def __cinit__(self):
-        self.thisptr = new RtMidiOut(string(<char*>"rtmidiout"))
+        #self.thisptr = new RtMidiOut(string(<char*>"rtmidiout"))
+        self.thisptr = new RtMidiOut()
     def __init__(self):
         pass
     def __dealloc__(self):
@@ -707,7 +721,8 @@ cdef class MidiOut(MidiBase):
         def __set__(self, value):
             self.msg3_locked = int(value)
     def __cinit__(self):
-        self.thisptr = new RtMidiOut(string(<char*>"rtmidiout"))
+        #self.thisptr = new RtMidiOut(string(<char*>"rtmidiout"))
+        self.thisptr = new RtMidiOut()
         self.msg3 = new vector[unsigned char]()
         for n in range(3):
             self.msg3.push_back(0)
