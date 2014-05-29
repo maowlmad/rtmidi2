@@ -7,37 +7,31 @@ Based on rtmidi-python
 
 ## Setup
 
-The wrapper is written in [Cython](http://www.cython.org), but the generated
-C++ code is included, so you can install the module as usual:
+The wrapper is written in [Cython](http://www.cython.org). Cython should
+be installed for this module to be installed
 
     python setup.py install
 
-If you want to build from the Cython source, make sure that you have a recent
-version of Cython (>= 0.15), and run:
-
-    python setup.py install --from-cython
 
 ## Usage Examples
 
-_rtmidi2_ uses the same API as RtMidi, only reformatted to comply with PEP-8,
-and with small changes to make it a little more pythonic.
+_rtmidi2_ uses a very similar API as RtMidi
 
-### Print all output ports
+### Print all in and out ports
 
-    import rtmidi2 as rtmidi
-
-    midi_out = rtmidi.MidiOut()
-    for port_name in midi_out.ports:
-        print port_name
+    import rtmidi2
+    print(rtmidi2.get_in_ports())
+    print(rtmidi2.get_out_ports())
 
 ### Send messages
 
-    import rtmidi2 as rtmidi
-
-    midi_out = rtmidi.MidiOut()
-    midi_out.open_port(0)
-
-    midi_out.send_noteon(0, 48, 100)  # send C3 with vel 100 on channel 1
+    import rtmidi2
+  
+    midi_out = rtmidi2.MidiOut()
+    # open the first available port
+    midi_out.open_port(0) 
+    # send C3 with vel. 100 on channel 1
+    midi_out.send_noteon(0, 48, 100)
 
 ### Get incoming messages - blocking interface
 
@@ -47,22 +41,17 @@ and with small changes to make it a little more pythonic.
     while True:
         message, delta_time = midi_in.get_message()  # will block until a message is available
         if message:
-            print message, delta_time
-
-Note that the signature of `get_message()` differs from the original RtMidi
-API: It returns a tuple (message, delta_time)
+            print(message, delta_time)
 
 ### Get incoming messages using a callback -- non blocking
 
     def callback(message, time_stamp):
-        print message, time_stamp
+        print(message, time_stamp)
 
-    midi_in = rtmidi.MidiIn()
+    midi_in = rtmidi2.MidiIn()
     midi_in.callback = callback
     midi_in.open_port(0)
 
-    # do something else here (but don't quit)
-    ...
 
 Note that the signature of the callback differs from the original RtMidi API:
 `message` is now the first parameter, like in the tuple returned by
@@ -73,20 +62,22 @@ Note that the signature of the callback differs from the original RtMidi API:
     midi_in = MidiInMulti().open_ports("*")
     def callback(msg, timestamp):
         msgtype, channel = splitchannel(msg[0])
-        print msgtype2str(msgtype), msg[1], msg[2]
+        print(msgtype2str(msgtype), msg[1], msg[2])
     midi_in.callback = callback
     
 You can also get the device which generated the event by changing your callback to:
 
     def callback(src, msg, timestamp):
-        print "got message from", src     # src will hold the name of the device
+        # src will hold the name of the device
+        print("got message from", src)
+        
         
 ### Send multiple notes at once
 
-The usecase for this is limited to a few niche-cases, but was the reason why I initiated
-this fork on the first place. I needed a fast way to send multiple notes at once for
-an application transcribing the spectrum of a voice to midi messages to be played
-by an automated piano.
+The usecase for this is limited to a few niche-cases, but was the reason why 
+this fork was initiated in the first place. I needed a fast way to send multiple 
+notes at once for an application transcribing the spectrum of a voice to 
+midi messages to be played by an automated piano.
 
     # send a cluster of ALL notes with a duration of 1 second
     midi_out = MidiOut().open_port()
