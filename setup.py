@@ -1,13 +1,8 @@
 import distutils
 import sys
+from Cython.Distutils import build_ext
 
-if not '--from-cpp' in sys.argv:
-    from Cython.Distutils import build_ext
-    module_source = 'rtmidi2.pyx'
-else:
-    from distutils.command.build_ext import build_ext
-    sys.argv.remove('--from-cpp')    
-    module_source = 'rtmidi2.cpp'
+module_source = 'rtmidi2.pyx'
 
 extension_args = {}
 
@@ -43,18 +38,23 @@ rtmidi_module = distutils.extension.Extension(
 
 distutils.core.setup(
     name='rtmidi2',
-    version='0.4.0.5',
+    version='0.5',
     description='Python wrapper for RtMidi written in Cython. Allows sending raw messages, multi-port input and sending multiple messages in one call.',
     author='originally by Guido Lorenz, modified by Eduardo Moguillansky',
-    author_email='code@superquadratic.net',
+    author_email='eduardo.moguillansky@gmail.com',
     url="https://github.com/gesellkammer/rtmidi2",
     cmdclass={'build_ext': build_ext},
     ext_modules=[rtmidi_module],
     license='MIT',
+    platforms='any',
     classifiers=[
         'Development Status :: 4 - Beta',
         'Programming Language :: Cython',
         'Topic :: Multimedia :: Sound/Audio :: MIDI',
-        'License :: OSI Approved :: MIT License'
+        'License :: OSI Approved :: MIT License',
+        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.4',
+        'Topic :: Software Development :: Libraries :: Python Modules'
     ]
 )

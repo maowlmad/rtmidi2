@@ -8,7 +8,7 @@ Based on rtmidi-python
 ## Setup
 
 The wrapper is written in [Cython](http://www.cython.org). Cython should
-be installed for this module to be installed
+be installed for this module to be installed. RtMidi is included in the source tree, so you only need to do:
 
     python setup.py install
     
@@ -71,6 +71,7 @@ Note that the signature of the callback differs from the original RtMidi API:
 ### Open multiple ports at once
    
 ```python
+# get messages from all available ports
 midi_in = MidiInMulti().open_ports("*")
 
 def callback(msg, timestamp):
