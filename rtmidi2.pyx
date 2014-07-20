@@ -10,7 +10,7 @@ from cython.operator cimport dereference as deref, preincrement as inc
 ### definitions
 cdef extern from "Python.h":
     void PyEval_InitThreads()
-from libc.stdlib cimport malloc, free
+#from libc.stdlib cimport malloc, free
 
 ### python imports
 import inspect
@@ -32,6 +32,8 @@ CC         = DCC
 NOTEOFF    = DNOTEOFF
 PROGCHANGE = DPROGCHANGE
 PITCHWHEEL = DPITCHWHEEL
+
+_midiin = None
 
 cdef list _notenames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "Bb", "B", "C"]
 cdef dict MSGTYPES = {
@@ -132,8 +134,15 @@ cdef class MidiBase:
 
     property ports:
         def __get__(self):
-            ports = (self.baseptr().getPortName(i).c_str() for i in range(self.baseptr().getPortCount()))
-            return [port for port in ports if port]
+            cdef string name
+            ports = []
+            for i in range(self.baseptr().getPortCount()):
+                name = self.baseptr().getPortName(i)
+                if len(name):
+                    ports.append(name.decode('UTF-8', errors='ignore'))
+            return ports
+            #ports = (self.baseptr().getPortName(i).c_str() for i in range(self.baseptr().getPortCount()))
+            #return [port for port in ports if port]
 
     def open_virtual_port(self, port_name):
         if not isinstance(port_name, bytes):
@@ -271,6 +280,7 @@ cdef class MidiIn(MidiBase):
             return (message, delta_time) if gettime == 1 else message
         else:
             return (None, None) if gettime == 1 else None
+
 
 cdef class MidiInMulti:
     cdef RtMidiIn* inspector
@@ -467,14 +477,12 @@ cdef class MidiInMulti:
             if callback is None:
                 self._cancel_callbacks()
             else:
-                try:
-                    numargs = _func_get_numargs(callback)
-                    if numargs == 3:
-                        self._set_qualified_callback(callback)
-                        return
-                except AttributeError:
-                    # this is a builtin function? Anyway, we assume it is a 2 arg callback
-                    pass
+                numargs = _func_get_numargs(callback)
+                if numargs == 3:
+                    self._set_qualified_callback(callback)
+                    return
+                if not (numargs == 2 or (numargs is None and callable(callback))):
+                    raise TypeError("callback should be a callable function of the form func(src, msg, time)")
                 self.py_callback = callback
                 for i in range(self.ptrs.size()):
                     ptr = self.ptrs.at(i)
@@ -581,9 +589,12 @@ cpdef tuple splitchannel(int b):
     return b & 0xF0, b & 0x0F
 
 def _func_get_numargs(func):
-    spec = inspect.getargspec(func)
-    numargs = sum(1 for a in spec.args if a is not "self")
-    return numargs
+    try:
+        spec = inspect.getargspec(func)
+        numargs = sum(1 for a in spec.args if a is not "self")
+        return numargs
+    except TypeError:
+        return None
 
 def msgtype2str(msgtype):
     """
@@ -618,9 +629,9 @@ def mididump_callback(src, msg, t):
     srcstr = src.ljust(20)[:20]
     if msgt == CC:
         print "%s | CC | ch %02d | cc %03d | val %03d" % (srcstr, ch, val1, val2)
-    elif msgt == NOTEON:
+    elif msgt == NOTEON or msgt == NOTEOFF:
         notename = midi2note(val1)
-        print "%s | NOTEON | ch %d | note %s (%03d) | vel %d" % (srcstr, ch, notename.ljust(3), val1, val2)
+        print "%s | %s | ch %d | note %s (%03d) | vel %d" % (srcstr, msgtstr.ljust(7), ch, notename.ljust(3), val1, val2)
     else:
         print "%s | %s | ch %d | val1 %d | val2 %d" % (srcstr, msgtstr, ch, val1, val2)
 
@@ -628,14 +639,14 @@ def mididump(port_pattern="*"):
     """
     listen to all ports matching pattern and print the received messages
     """
-    m = MidiInMulti().open_ports(port_pattern)
-    m.set_callback(mididump_callback, src_as_string=True)
+    m = MidiInMulti().open_ports(port_pattern) 
+    m._set_qualified_callback(mididump_callback, src_as_string=True)
     return m
 
 def get_in_ports():
     """returns a list of available in ports"""
-    return MidiIn().ports
-
+    return _get_midiin().ports
+    
 def get_out_ports():
     """returns a list of available out ports"""
     return MidiOut().ports
@@ -831,4 +842,10 @@ cpdef int cents2pitchbend(int cents, int maxdeviation=200):
 
 cpdef int pitchbend2cents(int pitchbend, maxcents=200):
     return int(((pitchbend/16383.0)*(maxcents*2.0))-maxcents+0.5)
+
+cpdef MidiIn _get_midiin():
+    global _midiin
+    if _midiin is None:
+        _midiin = MidiIn()
+    return _midiin
 
