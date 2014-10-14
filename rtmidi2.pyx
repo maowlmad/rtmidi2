@@ -85,8 +85,11 @@ cdef class MidiBase:
         """
         port: an integer or a string
         
-        The string can contain a pattern, in which case it will be matched against
-        the existing ports and the first match will be used
+        * The string can contain a glob pattern, in which case it will be 
+        matched against the existing ports and the first match will be used
+        * An integer is the index to the list of available ports
+
+        Returns: self
 
         Example
         =======
@@ -110,6 +113,8 @@ cdef class MidiBase:
                 else:
                     raise ValueError("Port not found")
         self.baseptr().openPort(port_number)
+        if self._openedports is None:
+            self._openedports = []
         self._openedports.append(port_number)
         return self
 
@@ -189,6 +194,7 @@ cdef class MidiIn(MidiBase):
             clientname = clientname.encode("ASCII", errors="ignore")
             self.thisptr = new RtMidiIn(UNSPECIFIED, string(<char*>clientname), queuesize)
         self.py_callback = None
+        self._openedports = []
 
     def __init__(self, clientname=None, queuesize=100):
         """
@@ -238,12 +244,22 @@ cdef class MidiIn(MidiBase):
             return self.py_callback
         def __set__(self, callback):
             if callback is None:
-                if self.py_callback is not None:
-                    self.thisptr.cancelCallback()
-                    self.py_callback = None
+                self._cancel_callback()
             else:
-                self.py_callback = callback
-                self.thisptr.setCallback(midi_in_callback, <void*>callback)
+                self._set_callback(callback)
+
+    cdef void _cancel_callback(self):
+        """cancel a previously set callback. Does nothing if callback was not set"""
+        if self.py_callback is not None:
+            self.thisptr.cancelCallback()
+            self.py_callback = None
+
+    cdef void _set_callback(self, callback):
+        """set callback. If already set, cancels previous callback"""
+        if self.py_callback is not None:
+            self._cancel_callback()
+        self.py_callback = callback
+        self.thisptr.setCallback(midi_in_callback, <void*>callback)
 
     def ignore_types(self, midi_sysex=True, midi_time=True, midi_sense=True):
         """
